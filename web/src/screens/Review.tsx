@@ -1,0 +1,288 @@
+// Review and export: compare two versions side by side, pin customer feedback on the model,
+// export the scene's package and test it in Unreal. Recreates Review.dc.html (CONTRACT §8–10).
+import { useEffect, useRef, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { api, errorText, fileUrl, modelUrl } from '../api';
+import { ChatPanel, ErrorNote, JobLines, Loading, TopBar } from '../components/common';
+import { remember, useJobs, useLoad, useProject } from '../hooks';
+import type { ViewName } from '../lib/frames';
+import { partLabel } from '../lib/parts';
+import { paths } from '../lib/routing';
+import type { ExportResult, Pin, Scene, UnrealReport, Vec3 } from '../types';
+import { PIN_COLORS, ShipViewer, ViewButtons } from '../viewer/Viewer';
+import { ScenePicker } from './AssemblyScenePicker';
+import { specOf } from './Assembly';
+
+const STATUS_TEXT: Record<string, string> = { open: 'Open', working: 'AI working', waiting: 'Waiting for you', resolved: 'Done' };
+const STATUS_CHIP: Record<string, string> = { open: 'amber', working: 'blue', waiting: 'blue', resolved: 'green' };
+
+export function Review() {
+  const { sceneId } = useParams();
+  if (!sceneId) return <ScenePicker to={paths.review} title="Review and export" />;
+  return <ReviewScene key={sceneId} sceneId={sceneId} />;
+}
+
+interface Draft { part: string; point: Vec3; left: number; top: number }
+
+function ReviewScene({ sceneId }: { sceneId: string }) {
+  const scene = useLoad<Scene>(() => api.scene(sceneId), [sceneId]);
+  const s = scene.data;
+  const ship = useProject(s?.ship.project);
+  const { jobs, run, dismiss, busy } = useJobs();
+  const [a, setA] = useState<number | null>(null);
+  const [b, setB] = useState<number | null>(null);
+  const [view, setView] = useState<ViewName>('port');
+  const [pinMode, setPinMode] = useState(false);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [draftText, setDraftText] = useState('');
+  const [selPin, setSelPin] = useState<string | null>(null);
+  const [target, setTarget] = useState<'unreal' | 'mak'>('unreal');
+  const [exported, setExported] = useState<ExportResult | null>(null);
+  const [makNote, setMakNote] = useState(false);
+  const [report, setReport] = useState<UnrealReport | null>(null);
+  const [feedback, setFeedback] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const compareRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { remember('scene', sceneId); }, [sceneId]);
+
+  const p = ship.data;
+  const versions = p?.versions ?? [];
+  // Default: the two latest versions, latest on the right.
+  useEffect(() => {
+    if (!p || b !== null) return;
+    const ns = p.versions.map((v) => v.n);
+    setB(ns[ns.length - 1] ?? p.version);
+    setA(ns.length > 1 ? ns[ns.length - 2] : ns[ns.length - 1] ?? p.version);
+  }, [p, b]);
+
+  if (scene.error) return <><TopBar /><div style={{ padding: 24 }}><ErrorNote error={scene.error} retry={scene.reload} /></div></>;
+  if (!s) return <><TopBar /><div className="viewer"><Loading what="the scene" /></div></>;
+
+  const pick = (n: number) => {
+    if (n === a || n === b) return;
+    setA(b); setB(n);
+  };
+  const vInfo = (n: number | null) => versions.find((v) => v.n === n);
+  const pins = p?.pins ?? [];
+  const partPaths = (p?.parts ?? []).map((x) => x.path);
+
+  const reloadShip = () => { void ship.reload(); };
+  const chat = (text: string) => p ? run('Working on it', () => api.chat(p.id, text, 'build'), reloadShip) : undefined;
+
+  const sendPin = () => {
+    if (!p || !draft || !draftText.trim()) return;
+    const d = draft; const text = draftText.trim();
+    setDraft(null); setDraftText(''); setPinMode(false);
+    void run('Sending the customer’s comment to the AI', async () => {
+      const r = await api.addPin(p.id, { part: d.part, point: d.point, text, author: 'Customer' });
+      setSelPin(r.pin.id);
+      await ship.reload();
+      return { job_id: r.job_id };
+    }, reloadShip);
+  };
+
+  const pinAction = (pin: Pin) => {
+    if (!p) return;
+    if (pin.status === 'open') {
+      void run('Sending to the AI', () => api.replyPin(p.id, pin.id, 'Please make this change.'), reloadShip);
+    } else if (pin.status === 'waiting') {
+      api.setPinStatus(p.id, pin.id, 'resolved').then(reloadShip, (e) => setErr(errorText(e)));
+    } else if (pin.status === 'resolved' && pin.before_version != null && pin.after_version != null) {
+      setA(pin.before_version); setB(pin.after_version);
+    }
+  };
+  const actionLabel = (pin: Pin) => ({ open: 'Send to AI', working: 'Working…', waiting: 'Keep it', resolved: 'View change' } as Record<string, string>)[pin.status] ?? 'Open';
+
+  const doExport = () => {
+    setExported(null); setMakNote(false);
+    if (target === 'mak') { setMakNote(true); return; }
+    void run<ExportResult>('Exporting the package', () => api.exportScene(s.id), (r) => setExported(r));
+  };
+  const doUnreal = () => {
+    setReport(null);
+    void run<UnrealReport>('Testing in Unreal 5.8', () => api.unrealTest(s.id), (r) => setReport(r));
+  };
+  const adoptVersion = async (n: number) => {
+    try {
+      const r = await api.updateScene(s.id, { ...specOf(s), ship: { ...s.ship, version: n } });
+      scene.setData(r.scene);
+    } catch (e) { setErr(errorText(e)); }
+  };
+
+  const present = () => {
+    const el = compareRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void el.requestFullscreen?.();
+  };
+
+  const shipId = p?.spec.id ?? s.ship.project;
+  const crewIds = Array.from(new Set(s.crew.map((c) => c.project)));
+  const layout = `<package_id>/ · manifest.json · ship/${shipId}.glb · ship/${shipId}.json · ship/articulation.json · ${crewIds.map((c) => `crew/${c}.glb`).join(', ') || 'crew/ (none placed)'} · research/research.json`;
+
+  const pane = (n: number | null, right: boolean) => {
+    const info = vInfo(n);
+    return (
+      <div style={{ background: 'var(--stage)', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, padding: '12px 16px 8px' }}>
+          <span style={{ fontWeight: 500 }}>v{n ?? '–'}</span>
+          <span className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{info?.summary ?? ''}</span>
+        </div>
+        <div ref={right ? rightRef : undefined} style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex' }}>
+          {n !== null && p ? (
+            <ShipViewer
+              url={modelUrl(p.id, n)} view={view} partPaths={partPaths}
+              pins={right ? pins : undefined} selectedPinId={right ? selPin : null}
+              selectedPart={right ? (draft?.part ?? pins.find((x) => x.id === selPin)?.part ?? null) : null}
+              pickMode={right && pinMode}
+              onPinClick={(pin) => { setSelPin(pin.id); setDraft(null); }}
+              onPick={(r) => {
+                if (!r.part) return;
+                const box = rightRef.current?.getBoundingClientRect();
+                const left = box ? Math.min(Math.max(8, r.clientX - box.left + 12), box.width - 290) : 12;
+                const top = box ? Math.min(Math.max(8, r.clientY - box.top - 20), box.height - 220) : 12;
+                setDraft({ part: r.part, point: r.point, left, top }); setDraftText('');
+              }}
+              overlay={right && draft ? (
+                <div className="popover" role="dialog" aria-label="Customer comment" style={{ left: draft.left, top: draft.top, width: 280 }}>
+                  <span className="faint" style={{ fontSize: 12 }}>The customer is pointing at</span>
+                  <span className="tag" style={{ alignSelf: 'flex-start', fontSize: 13 }}>{partLabel(draft.part)}</span>
+                  <label htmlFor="cust-text" className="sr-only">What they said</label>
+                  <textarea id="cust-text" className="field dark" rows={2} autoFocus value={draftText}
+                    placeholder="Type what they said" onChange={(e) => setDraftText(e.target.value)} />
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button className="btn sm" onClick={() => setDraft(null)}>Cancel</button>
+                    <button className="btn sm primary" disabled={!draftText.trim()} onClick={sendPin}>Pin it</button>
+                  </div>
+                </div>
+              ) : undefined}
+            />
+          ) : <Loading what="the ship" />}
+        </div>
+      </div>
+    );
+  };
+
+  const exportVersion = s.ship.version;
+
+  return (
+    <>
+      <TopBar title={s.name}>
+        <button className="btn lg" style={{ marginLeft: 'auto', height: 34 }} onClick={present}>Present to customer</button>
+      </TopBar>
+      <div className="workspace">
+        <aside className="side left" style={{ width: 260, padding: 16, gap: 8, fontSize: 13 }}>
+          <div className="faint">Versions. Click two to compare.</div>
+          <div className="scroll" style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '40%' }}>
+            {versions.map((v) => {
+              const on = v.n === a || v.n === b;
+              return (
+                <button key={v.n} className={`row-btn ${on ? 'on' : ''}`} style={{ flexDirection: 'column', gap: 4, padding: '10px 12px' }} onClick={() => pick(v.n)}>
+                  <span style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                    <span style={{ fontWeight: 500 }}>v{v.n}{v.ok ? '' : ' · build failed'}</span>
+                    <span style={{ fontSize: 11, color: 'var(--accent-link)' }}>{v.n === a ? 'Left' : v.n === b ? 'Right' : ''}</span>
+                  </span>
+                  <span className="muted" style={{ fontSize: 12 }}>{v.summary}</span>
+                </button>
+              );
+            })}
+            {p && !versions.length && <span className="faint">No versions yet.</span>}
+          </div>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--border)', marginTop: 4 }}>
+            <ChatPanel messages={p?.messages ?? []} onSend={chat} busy={busy} label="Chat" placeholder="Do all open feedback" />
+          </div>
+        </aside>
+
+        <section className="stage">
+          <div className="toolbar">
+            <button className={`btn ${pinMode ? 'primary' : 'selected'}`} onClick={() => { setPinMode(!pinMode); setDraft(null); }}>
+              {pinMode ? 'Placing a pin…' : 'Pin customer feedback'}
+            </button>
+            <span className="faint" style={{ fontSize: 12 }}>{pinMode ? 'Click the part they point at, on the right-hand model.' : 'Pins show on the right-hand version.'}</span>
+            <span style={{ marginLeft: 'auto' }}><ViewButtons view={view} onView={setView} /></span>
+          </div>
+          <div ref={compareRef} style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, background: 'var(--border)' }}>
+            {pane(a, false)}
+            {pane(b, true)}
+          </div>
+          <div style={{ borderTop: '1px solid var(--border)', background: 'var(--panel)', padding: '14px 16px', display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', fontSize: 13 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 360px', minWidth: 0 }}>
+              <span style={{ fontWeight: 500 }}>Export package</span>
+              <span className="mono muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{layout}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className={`btn lg ${target === 'unreal' ? 'selected' : 'muted'}`} onClick={() => { setTarget('unreal'); setMakNote(false); }}>Unreal 5.8</button>
+              <button className={`btn lg ${target === 'mak' ? 'selected' : 'muted'}`} onClick={() => { setTarget('mak'); setExported(null); }}>MAK (planned)</button>
+            </div>
+            <button className="btn primary lg" onClick={doExport} disabled={busy}>Export v{exportVersion}</button>
+            <button className="btn lg" onClick={doUnreal} disabled={busy || target === 'mak'}>Test in Unreal</button>
+            {b !== null && b !== exportVersion && (
+              <span className="warn" style={{ flexBasis: '100%', display: 'flex', gap: 10, alignItems: 'center' }}>
+                The scene uses v{exportVersion}, so that is what exports. You are looking at v{b} on the right.
+                <button className="btn sm" onClick={() => void adoptVersion(b)}>Use v{b} in the scene</button>
+              </span>
+            )}
+            {makNote && <span className="ok" style={{ flexBasis: '100%' }}>MAK export isn’t built yet. The same folder will feed it when it is.</span>}
+            {exported && (
+              <span className="ok" style={{ flexBasis: '100%', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                Exported v{exportVersion}, with the research inside, to <span className="mono">{exported.package_dir}</span>.
+                <a className="btn sm" href={fileUrl(exported.zip_url)} download>Download zip</a>
+              </span>
+            )}
+            {report && (
+              <div style={{ flexBasis: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span className={report.ok ? 'ok' : 'bad'} style={{ fontWeight: 500 }}>
+                  {report.ok ? '✓ Unreal imported it and every check passed' : '✗ Unreal import has failing checks'} · Unreal {report.engine} · <span className="mono" style={{ fontWeight: 400 }}>{report.level}</span>
+                </span>
+                {report.checks.map((c, i) => (
+                  <span key={i} style={{ display: 'flex', gap: 8 }}>
+                    <span className={c.pass ? 'ok' : 'bad'}>{c.pass ? '✓' : '✗'}</span>
+                    <span>{c.name}</span>
+                    <span className="muted">{c.detail}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div style={{ flexBasis: '100%' }}><JobLines jobs={jobs} dismiss={dismiss} /></div>
+            <div style={{ flexBasis: '100%' }}><ErrorNote error={err ?? ship.error} /></div>
+          </div>
+        </section>
+
+        <aside className="side right" style={{ width: 340, fontSize: 13 }}>
+          <div style={{ padding: '16px 16px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 15, fontWeight: 500 }}>Pinned comments</span>
+            <span className="faint">{p?.name ?? 'Ship'} · shown on v{b ?? '–'} · each pin is a task</span>
+          </div>
+          <div className="scroll" style={{ flex: 1, padding: '8px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {!pins.length && <span className="faint">No pins yet. In the meeting, press “Pin customer feedback” and click where they point.</span>}
+            {pins.map((pin, i) => (
+              <div key={pin.id} className="card" onClick={() => setSelPin(pin.id)}
+                style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, borderColor: pin.id === selPin ? 'var(--accent)' : undefined }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 24, height: 24, borderRadius: 12, background: PIN_COLORS[pin.status] ?? '#A7AEB8', color: 'var(--on-accent)', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
+                  <span className="tag">{partLabel(pin.part)}</span>
+                  <span className="faint" style={{ marginLeft: 'auto', fontSize: 11 }}>{pin.author}</span>
+                </span>
+                <span style={{ lineHeight: 1.5 }}>“{pin.messages[0]?.text ?? ''}”</span>
+                {pin.messages.length > 1 && <span className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>AI: {pin.messages[pin.messages.length - 1].text}</span>}
+                <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span className={`chip ${STATUS_CHIP[pin.status] ?? 'grey'}`} style={{ fontSize: 12, padding: '3px 8px' }}>{STATUS_TEXT[pin.status] ?? pin.status}</span>
+                  <button className="btn sm" disabled={pin.status === 'working' || (pin.status === 'resolved' && pin.after_version == null)}
+                    onClick={(e) => { e.stopPropagation(); pinAction(pin); }}>{actionLabel(pin)}</button>
+                </span>
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: '12px 16px 16px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <label htmlFor="fb" className="faint" style={{ fontSize: 12 }}>In the meeting, pin where they point. For anything ship-wide, type it here</label>
+            <input id="fb" className="field" value={feedback} placeholder="Overall it should look more used"
+              onChange={(e) => setFeedback(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && feedback.trim()) { void chat(`Customer feedback: ${feedback.trim()}`); setFeedback(''); } }} />
+          </div>
+        </aside>
+      </div>
+    </>
+  );
+}
