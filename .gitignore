@@ -12,3 +12,4 @@ unreal/HarnessProject/Content/ME3D/
 unreal/out/
 *.blend1
 .DS_Store
+tests/blender/out/

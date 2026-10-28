@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -35,6 +36,9 @@ LOCKED_SPEC_KEYS = {"schema", "id", "type"}
 
 
 def make_unreal_runner(settings: Settings) -> UnrealRunner:
+    # Every run imports into the one harness project; two at once overwrite each other's assets.
+    lock = threading.Lock()
+
     def run(package_dir: Path, log) -> dict:
         script = settings.unreal_script
         if not script.exists():
@@ -42,13 +46,16 @@ def make_unreal_runner(settings: Settings) -> UnrealRunner:
         report_path = package_dir / "unreal_import_report.json"
         if report_path.exists():
             report_path.unlink()
-        log(f"$ {script} {package_dir}")
-        try:
-            proc = subprocess.run(["bash", str(script), str(package_dir)], capture_output=True, text=True,
-                                  errors="replace", timeout=settings.unreal_timeout_s,
-                                  cwd=str(settings.repo_root))
-        except subprocess.TimeoutExpired:
-            raise JobError(f"Unreal import test timed out after {settings.unreal_timeout_s:.0f} s.")
+        if lock.locked():
+            log("Waiting for another Unreal test to finish…")
+        with lock:
+            log(f"$ {script} {package_dir}")
+            try:
+                proc = subprocess.run(["bash", str(script), str(package_dir)], capture_output=True, text=True,
+                                      errors="replace", timeout=settings.unreal_timeout_s,
+                                      cwd=str(settings.repo_root))
+            except subprocess.TimeoutExpired:
+                raise JobError(f"Unreal import test timed out after {settings.unreal_timeout_s:.0f} s.")
         for line in (proc.stdout + proc.stderr).splitlines()[-60:]:
             log(line)
         report = read_json(report_path)
