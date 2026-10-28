@@ -1,0 +1,14 @@
+data/
+vendor/downloads/
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+web/dist/
+unreal/HarnessProject/Intermediate/
+unreal/HarnessProject/Saved/
+unreal/HarnessProject/DerivedDataCache/
+unreal/HarnessProject/Content/ME3D/
+unreal/out/
+*.blend1
+.DS_Store
