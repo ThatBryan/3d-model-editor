@@ -83,6 +83,12 @@ the exit code**: Blender returns 0 even when a script raises an error, unless th
 ```
 
 - `params` are the builder's own knobs; each builder documents its own in `catalog/ships/<type>.json`.
+- `meta` (optional) holds the `strait.ship_model/1` fields that `params` don't: `type` (from
+  StraitsSim's list; a sampan uses `fishing`, the closest), speeds, propulsion, `rcs_class`,
+  notes, source. Length, beam, draught and depth in `ship/<id>.json` always come from `params`,
+  because that is what was built.
+- A catalog file is a default spec plus documentation keys: `description`, and `param_docs`
+  mapping each param to `{"doc", "min", "max"}` (or `{"doc", "options": [...]}`).
 - `overrides` are applied after the build, to parts by path.
 - `custom_ops` run last, inside Blender, with the helper module `me3d` (from `blender/common.py`)
   in scope. This is how the AI adds geometry no builder knob covers. Every object a custom op
@@ -106,6 +112,18 @@ the exit code**: Blender returns 0 even when a script raises an error, unless th
 - **Rig:** MPFB2 `game_engine` skeleton for every human, the same skeleton for all.
 - Animations are **glTF animations named exactly as listed**, on that skeleton.
 - Equipment is a mesh named `Equipment__<Name>`, parented to a bone.
+- **Crew catalog file** (`catalog/crew/<id>.json`): the default spec's keys, plus `description`,
+  `param_docs` (body fields as `{"doc", "min", "max"}`) and `options`, which lists what is
+  actually installed and allowed:
+
+  ```json
+  "options": {"suit": ["male_worksuit01"], "shoes": ["shoes01"], "hat": [null, "fedora01"],
+              "skin": ["light", "medium", "dark"], "equipment": ["life_vest", "helmet"],
+              "animations": ["idle", "walk", "brace", "hands_up", "squat"]}
+  ```
+
+  The server's `GET /api/catalog` and the AI's validation read `options`; a value not listed
+  there is refused.
 
 ## 7. Scene (assembly) spec — `me3d.scene_spec/1`
 
@@ -233,3 +251,27 @@ data/packages/<package_id>/...  and <package_id>.zip
 ```
 
 `data/` is git-ignored.
+
+## 12. Research — `me3d.research/1`
+
+Stored on the project as `research`, and copied to `research/research.json` in the package. The
+standard is the PCG 3-Series dossier described in `docs/PLAN.md`.
+
+```json
+{
+  "schema": "me3d.research/1",
+  "subject": "PCG 3-Series PC Class, PC 303 as photographed in 2025",
+  "summary": {"verdict": "Coverage is strong above the waterline; dimensions remain open.",
+              "existing_work": "No existing model found in the project."},
+  "sources": [{"id": "S01", "title": "...", "url": "...", "status": "Official",
+               "what_it_proves": "..."}],
+  "claims": [{"claim": "Four outboards", "sources": ["S01", "P02"], "status": "Official + photo",
+              "consequence_for_model": "Model four separate motor assemblies; no waterjets."}],
+  "open_questions": [{"question": "...", "meanwhile": "..."}],
+  "articulation": [{"part": "Transom__Outboard_1", "motion": "steer, tilt, prop spin", "priority": "P0"}]
+}
+```
+
+`status` is one of: Official, Photographed, Photo reading, Inference, Comparison only,
+Secondary lead, Unverified (a claim may combine two with " + "). The server validates this
+shape and returns errors to the AI rather than saving a malformed record.
