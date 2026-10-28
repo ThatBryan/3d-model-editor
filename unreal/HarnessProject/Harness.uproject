@@ -1,0 +1,13 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.8",
+	"Category": "",
+	"Description": "Throwaway UE 5.8 project the 3D model editor imports export packages into (see docs/CONTRACT.md section 9).",
+	"Plugins": [
+		{ "Name": "PythonScriptPlugin", "Enabled": true },
+		{ "Name": "EditorScriptingUtilities", "Enabled": true },
+		{ "Name": "Interchange", "Enabled": true },
+		{ "Name": "InterchangeEditor", "Enabled": true },
+		{ "Name": "InterchangeAssets", "Enabled": true }
+	]
+}
