@@ -624,7 +624,7 @@ def check_scene(report=None, budget=None, need_aft_masthead=True):
 
 
 def write_json(path, data):
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=1)
 
 

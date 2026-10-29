@@ -38,7 +38,7 @@ def api(tmp_path_factory):
     data_dir = tmp_path_factory.mktemp("data")
     env = dict(os.environ, ME3D_DATA_DIR=str(data_dir))
     proc = subprocess.Popen(
-        [str(ROOT / "server/.venv/bin/uvicorn"), "app.main:app", "--port", str(PORT),
+        [sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(PORT),
          "--app-dir", str(ROOT / "server")],
         cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
@@ -98,7 +98,7 @@ def test_container_with_crew_imports_into_unreal(api):
 
     export = wait_job(api, api.post(f"/api/scenes/{scene['id']}/export").json()["job_id"])
     pkg = Path(export["package_dir"])
-    manifest = json.loads((pkg / "manifest.json").read_text())
+    manifest = json.loads((pkg / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["schema"] == "me3d.package/1"
     assert len(manifest["crew"]) == 3
     # crew are placed at their stations, which sit on the ship (not at the origin)

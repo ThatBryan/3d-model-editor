@@ -13,7 +13,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ZIP="${1:-$ROOT/vendor/downloads/makehuman_system_assets_cc0.zip}"
-BLENDER="${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) DEFAULT_BLENDER="/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" ;;  # Git Bash on Windows
+  *) DEFAULT_BLENDER="/Applications/Blender.app/Contents/MacOS/Blender" ;;
+esac
+BLENDER="${BLENDER:-$DEFAULT_BLENDER}"
 URL="https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip"
 
 if [ ! -f "$ZIP" ]; then
@@ -24,7 +28,7 @@ fi
 unzip -tq "$ZIP" >/dev/null || { echo "zip is incomplete or corrupt: $ZIP (resume with curl -C -)" >&2; exit 1; }
 
 SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
-PY="$(mktemp -t mpfb_install).py"
+PY="$(mktemp "${TMPDIR:-/tmp}/mpfb_install.XXXXXX").py"
 trap 'rm -f "$PY"' EXIT
 cat > "$PY" <<'EOF'
 import bpy, importlib, os, sys, zipfile

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import threading
 import uuid
@@ -43,6 +44,8 @@ def make_unreal_runner(settings: Settings) -> UnrealRunner:
         script = settings.unreal_script
         if not script.exists():
             raise JobError(f"Unreal harness script missing: {script}")
+        if shutil.which("bash") is None:
+            raise JobError("The Unreal import test needs bash, which is not on PATH (the harness is macOS-only).")
         report_path = package_dir / "unreal_import_report.json"
         if report_path.exists():
             report_path.unlink()

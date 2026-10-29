@@ -53,7 +53,7 @@ def me3d_helpers(repo_root: Path) -> str:
     """Public functions in blender/common.py, as one line each, for the add_custom_op docs."""
     path = repo_root / "blender" / "common.py"
     try:
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError):
         return "(blender/common.py not readable; use bpy directly)"
     lines = []

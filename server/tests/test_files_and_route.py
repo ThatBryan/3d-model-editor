@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from app.main import safe_data_path
 from app.router import parse_route, route
 
@@ -9,11 +11,21 @@ def test_safe_data_path_blocks_escape(tmp_path):
     (data / "packages").mkdir(parents=True)
     (data / "packages" / "a.zip").write_bytes(b"x")
     (tmp_path / "secret.txt").write_text("s")
-    os.symlink(tmp_path / "secret.txt", data / "link.txt")
     assert safe_data_path(data, "packages/a.zip") == (data / "packages" / "a.zip").resolve()
     for bad in ["../secret.txt", "packages/../../secret.txt", str(tmp_path / "secret.txt"),
-                "link.txt", "packages", "", "packages/a.zip\x00"]:
+                "packages", "", "packages/a.zip\x00"]:
         assert safe_data_path(data, bad) is None, bad
+
+
+def test_safe_data_path_blocks_symlink_out(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    (tmp_path / "secret.txt").write_text("s")
+    try:
+        os.symlink(tmp_path / "secret.txt", data / "link.txt")
+    except OSError:  # Windows needs Developer Mode or admin to create symlinks
+        pytest.skip("cannot create symlinks here")
+    assert safe_data_path(data, "link.txt") is None
 
 
 def test_files_endpoint(make_client, settings):

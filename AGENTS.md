@@ -24,6 +24,25 @@ he is not an engineer. The approved design is the canvas linked in `docs/CONTRAC
 - Unreal: `/Users/Shared/Epic Games/UE_5.8` (`Engine/Binaries/Mac/UnrealEditor-Cmd`).
 - The AI uses the local Claude Code login through `claude-agent-sdk`; no API key is set or needed.
 
+## Windows
+
+Everything except the Unreal harness (macOS-only) runs on Windows. `server/app/config.py` picks
+Windows defaults; override any of them with `ME3D_BLENDER`, `ME3D_MPFB_DIR`, `ME3D_UNREAL_DIR`.
+
+- Blender 5.2: `winget install BlenderFoundation.Blender` →
+  `C:\Program Files\Blender Foundation\Blender 5.2\blender.exe`. MPFB2:
+  `blender --online-mode -c extension install -s -e mpfb`. Asset pack: run
+  `bash tools/install_mpfb_assets.sh` from Git Bash.
+- Python 3.11: `py -3.11 -m venv server\.venv`, then
+  `server\.venv\Scripts\python -m pip install -r server\requirements.txt`.
+- Node 22. If Node is managed by nvm-windows, use `nvm install 22` / `nvm use 22`; a Node MSI
+  installs *through* nvm's symlink into the active version's folder and breaks it.
+- Run: `start.cmd` (or double-click it) starts the server and the web app and opens
+  http://localhost:5173; Ctrl+C stops both. `start.cmd -Mock` runs the web app alone on canned
+  data, `-NoBrowser` skips the browser. By hand: `server\.venv\Scripts\python -m uvicorn
+  app.main:app --port 8787 --app-dir server`, and in a second terminal `cd web; npm run dev`.
+- In the gates below, use `server\.venv\Scripts\python` for `server/.venv/bin/python`.
+
 ## Gates
 
 - Server: `server/.venv/bin/python -m pytest server/tests -q`

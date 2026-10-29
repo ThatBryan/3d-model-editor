@@ -59,7 +59,7 @@ class Checks:
 
 # ------------------------------------------------------------------------------------ helpers
 def read_manifest():
-    return json.loads((PKG_DIR / "manifest.json").read_text())
+    return json.loads((PKG_DIR / "manifest.json").read_text(encoding="utf-8"))
 
 
 def paths_for(manifest):
@@ -308,7 +308,7 @@ def check_log(checks):
 
 
 def phase_verify():
-    state = json.loads(STATE_FILE.read_text()) if STATE_FILE.is_file() else {}
+    state = json.loads(STATE_FILE.read_text(encoding="utf-8")) if STATE_FILE.is_file() else {}
     checks = Checks(state.get("checks", []))
     m = read_manifest()
     if not state.get("completed"):
@@ -351,7 +351,7 @@ def phase_verify():
                "; ".join(wrong_parent) or f"all {len(mesh_nodes)} parts attached as in the GLB")
 
     # ---- articulation: own actor, attached to its parent, pivot, and it moves
-    art = json.loads((PKG_DIR / m["ship"]["articulation"]).read_text())
+    art = json.loads((PKG_DIR / m["ship"]["articulation"]).read_text(encoding="utf-8"))
     for j in art:
         name = f"articulated_part:{j['part']}"
         a = actors.get(j["part"])

@@ -28,7 +28,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-BLENDER = os.environ.get("BLENDER", "/Applications/Blender.app/Contents/MacOS/Blender")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server"))
+from app.config import DEFAULT_BLENDER  # noqa: E402
+
+BLENDER = os.environ.get("BLENDER", str(DEFAULT_BLENDER))
 HERE = Path(__file__).resolve().parent
 WORKER_GLB = HERE / "fixtures" / "Worker.glb"
 PACKAGE_ID = "pkg_fixture_boat"
@@ -205,7 +208,7 @@ def make_package(out_root: Path) -> Path:
     pkg.mkdir(parents=True)
     _run_blender("ship", str(pkg))
     _run_blender("crew", str(pkg), str(WORKER_GLB))
-    stations = json.loads((pkg / "_stations.json").read_text())
+    stations = json.loads((pkg / "_stations.json").read_text(encoding="utf-8"))
     (pkg / "_stations.json").unlink()
     (pkg / "ship" / f"{SHIP_ID}.json").write_text(json.dumps({
         "schema": "strait.ship_model/1", "id": SHIP_ID, "name": "Fixture boat", "type": "patrol",

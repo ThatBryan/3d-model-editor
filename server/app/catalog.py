@@ -33,7 +33,7 @@ class Catalog:
         if not path.exists():
             raise CatalogError(f"No {kind} called {base!r} in the catalog ({path}).")
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             raise CatalogError(f"{path} is not valid JSON: {e}") from e
         if not isinstance(data, dict):
@@ -70,7 +70,7 @@ class Catalog:
             return out
         for p in sorted(d.glob("*.json")):
             try:
-                data = json.loads(p.read_text())
+                data = json.loads(p.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
             if isinstance(data, dict):

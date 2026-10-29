@@ -1,6 +1,9 @@
 """Two Unreal tests at once must not overlap: they import into one shared harness project, and
 an overlap overwrites the other run's assets without any error."""
+import shutil
 import threading
+
+import pytest
 
 from app.config import Settings
 from app.main import make_unreal_runner
@@ -13,6 +16,7 @@ echo '{"ok": true, "checks": []}' > "$1/unreal_import_report.json"
 """
 
 
+@pytest.mark.skipif(shutil.which("bash") is None, reason="the Unreal runner calls bash, which is not on PATH")
 def test_unreal_runs_never_overlap(tmp_path, monkeypatch):
     (tmp_path / "unreal").mkdir()
     (tmp_path / "unreal" / "run_import_test.sh").write_text(FAKE)

@@ -12,13 +12,17 @@ import copy
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server"))
+from app.config import DEFAULT_BLENDER  # noqa: E402
 
 import pytest
 from pygltflib import GLTF2
 
 ROOT = Path(__file__).resolve().parents[2]
-BLENDER = os.environ.get("BLENDER", "/Applications/Blender.app/Contents/MacOS/Blender")
+BLENDER = os.environ.get("BLENDER", str(DEFAULT_BLENDER))
 BUILD = ROOT / "blender" / "build_ship.py"
 TYPES = ("container", "sampan", "tanker")
 BUDGET = {"container": 200_000, "tanker": 200_000, "sampan": 50_000}
@@ -91,9 +95,9 @@ def run_build(spec, out_dir):
         [BLENDER, "-b", "--factory-startup", "--python", str(BUILD), "--",
          "--spec", str(spec_path), "--out", str(out_dir)],
         capture_output=True, text=True, timeout=180)
-    report = json.loads((out_dir / "build_report.json").read_text())
+    report = json.loads((out_dir / "build_report.json").read_text(encoding="utf-8"))
     parts_file = out_dir / "parts.json"
-    parts = json.loads(parts_file.read_text()) if parts_file.exists() else []
+    parts = json.loads(parts_file.read_text(encoding="utf-8")) if parts_file.exists() else []
     return proc, report, parts
 
 
@@ -105,11 +109,11 @@ def measure(glb):
     proc = subprocess.run([BLENDER, "-b", "--factory-startup", "--python", str(script), "--",
                            str(glb), str(out)], capture_output=True, text=True, timeout=180)
     assert out.exists(), proc.stdout[-3000:] + proc.stderr[-3000:]
-    return json.loads(out.read_text())
+    return json.loads(out.read_text(encoding="utf-8"))
 
 
 def catalog(t):
-    return json.loads((ROOT / "catalog" / "ships" / f"{t}.json").read_text())
+    return json.loads((ROOT / "catalog" / "ships" / f"{t}.json").read_text(encoding="utf-8"))
 
 
 def station_offenders(m):

@@ -4,10 +4,21 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+IS_WINDOWS = sys.platform == "win32"
+
+if IS_WINDOWS:
+    DEFAULT_BLENDER = Path(r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe")
+    BLENDER_CONFIG = Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming")) / "Blender Foundation/Blender/5.2"
+    DEFAULT_UNREAL = Path(r"C:\Program Files\Epic Games\UE_5.8")
+else:
+    DEFAULT_BLENDER = Path("/Applications/Blender.app/Contents/MacOS/Blender")
+    BLENDER_CONFIG = Path.home() / "Library/Application Support/Blender/5.2"
+    DEFAULT_UNREAL = Path("/Users/Shared/Epic Games/UE_5.8")
 
 
 def _env_path(name: str, default: Path) -> Path:
@@ -20,13 +31,10 @@ class Settings:
     repo_root: Path = REPO_ROOT
     data_dir: Path = field(default_factory=lambda: _env_path("ME3D_DATA_DIR", REPO_ROOT / "data"))
     catalog_dir: Path = field(default_factory=lambda: _env_path("ME3D_CATALOG_DIR", REPO_ROOT / "catalog"))
-    blender: Path = field(default_factory=lambda: _env_path(
-        "ME3D_BLENDER", Path("/Applications/Blender.app/Contents/MacOS/Blender")))
+    blender: Path = field(default_factory=lambda: _env_path("ME3D_BLENDER", DEFAULT_BLENDER))
     mpfb_dir: Path = field(default_factory=lambda: _env_path(
-        "ME3D_MPFB_DIR",
-        Path.home() / "Library/Application Support/Blender/5.2/extensions/blender_org/mpfb"))
-    unreal_dir: Path = field(default_factory=lambda: _env_path(
-        "ME3D_UNREAL_DIR", Path("/Users/Shared/Epic Games/UE_5.8")))
+        "ME3D_MPFB_DIR", BLENDER_CONFIG / "extensions/blender_org/mpfb"))
+    unreal_dir: Path = field(default_factory=lambda: _env_path("ME3D_UNREAL_DIR", DEFAULT_UNREAL))
     build_timeout_s: float = float(os.environ.get("ME3D_BUILD_TIMEOUT_S", "900"))
     unreal_timeout_s: float = float(os.environ.get("ME3D_UNREAL_TIMEOUT_S", "3600"))
     agent_model: str = os.environ.get("ME3D_AGENT_MODEL", "claude-opus-5-5")
@@ -56,7 +64,8 @@ def find_claude_cli() -> str | None:
     found = shutil.which("claude")
     if found:
         return found
-    for p in ("/opt/homebrew/bin/claude", "/usr/local/bin/claude", str(Path.home() / ".claude/local/claude")):
+    for p in ("/opt/homebrew/bin/claude", "/usr/local/bin/claude", str(Path.home() / ".claude/local/claude"),
+              str(Path.home() / ".local/bin/claude.exe")):
         if Path(p).exists():
             return p
     return None

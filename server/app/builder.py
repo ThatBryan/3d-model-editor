@@ -33,7 +33,7 @@ def read_report(out_dir: Path, exit_note: str = "") -> dict:
     if not path.exists():
         return failed_report(f"The builder wrote no build_report.json{exit_note}.")
     try:
-        report = json.loads(path.read_text())
+        report = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         return failed_report(f"build_report.json is unreadable ({e}){exit_note}.")
     if not isinstance(report, dict) or "ok" not in report:

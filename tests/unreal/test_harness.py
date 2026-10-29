@@ -34,7 +34,7 @@ def good_package(tmp_path_factory):
 
 def run_harness(pkg):
     proc = subprocess.run([str(RUN), str(pkg)], capture_output=True, text=True, timeout=3600)
-    report = json.loads((pkg / "unreal_import_report.json").read_text())
+    report = json.loads((pkg / "unreal_import_report.json").read_text(encoding="utf-8"))
     return proc, report, {c["name"]: c for c in report["checks"]}
 
 
@@ -60,12 +60,12 @@ def test_broken_package_fails_with_the_failing_checks_named(good_package, tmp_pa
     shutil.copytree(good_package, pkg)
     for stale in pkg.glob("unreal_*"):
         stale.unlink()
-    manifest = json.loads((pkg / "manifest.json").read_text())
+    manifest = json.loads((pkg / "manifest.json").read_text(encoding="utf-8"))
     manifest["id"] = "pkg_fixture_boat_broken"
     manifest["crew"][0]["animation"] = "wave_hello"           # not a clip in the crew GLB
     manifest["crew"][1]["location_m"][1] += 0.05              # 5 cm off its station
     (pkg / "manifest.json").write_text(json.dumps(manifest, indent=1))
-    art = json.loads((pkg / "ship" / "articulation.json").read_text())
+    art = json.loads((pkg / "ship" / "articulation.json").read_text(encoding="utf-8"))
     art.append({"part": "Deck__Ghost", "parent": "Hull__Main", "axis": "z", "min_deg": -90,
                 "max_deg": 90, "priority": "P2", "pivot_m": [0, 0, 1.5]})  # not in the GLB
     (pkg / "ship" / "articulation.json").write_text(json.dumps(art, indent=1))

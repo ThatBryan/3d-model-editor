@@ -16,12 +16,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server"))
+from app.config import BLENDER_CONFIG, DEFAULT_BLENDER  # noqa: E402
+
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-BLENDER = os.environ.get("BLENDER", "/Applications/Blender.app/Contents/MacOS/Blender")
+BLENDER = os.environ.get("BLENDER", str(DEFAULT_BLENDER))
 CATALOG = ROOT / "catalog" / "crew" / "male_default.json"
-MPFB_DATA = Path.home() / "Library/Application Support/Blender/5.2/extensions/.user/blender_org/mpfb/data"
+MPFB_DATA = BLENDER_CONFIG / "extensions/.user/blender_org/mpfb/data"
 ANIMS = ["idle", "walk", "brace", "hands_up", "squat"]
 GAME_ENGINE_BONES = sorted(
     ["Root", "pelvis", "spine_01", "spine_02", "spine_03", "neck_01", "head"]
@@ -41,7 +44,7 @@ needs_blender = pytest.mark.skipif(not Path(BLENDER).exists(), reason="Blender n
 # Pure logic (no Blender)
 
 def test_default_spec_normalises_cleanly():
-    spec, errors, warnings = crew_spec.normalize(json.loads(CATALOG.read_text()))
+    spec, errors, warnings = crew_spec.normalize(json.loads(CATALOG.read_text(encoding="utf-8")))
     assert errors == [] and warnings == []
     assert spec["body"]["height_cm"] == 178
     assert spec["equipment"] == [{"name": "life_vest", "color": crew_spec.EQUIPMENT_COLORS["orange"]}]
@@ -100,7 +103,7 @@ def test_catalog_options_are_installed():
     """Every clothes option the AI may pick must exist in MPFB's installed pack."""
     if not (MPFB_DATA / "packs" / "makehuman_system_assets.json").exists():
         pytest.skip("MakeHuman system asset pack not installed (run tools/install_mpfb_assets.sh)")
-    opts = json.loads(CATALOG.read_text())["options"]
+    opts = json.loads(CATALOG.read_text(encoding="utf-8"))["options"]
     for slot in ("suit", "shoes", "hat"):
         for name in opts[slot]:
             if name is not None:
@@ -121,7 +124,7 @@ def _build(tmp: Path, spec: dict) -> dict:
                           capture_output=True, text=True, timeout=900)
     report_path = out / "build_report.json"
     assert report_path.exists(), proc.stdout[-3000:] + proc.stderr[-3000:]
-    report = json.loads(report_path.read_text())
+    report = json.loads(report_path.read_text(encoding="utf-8"))
     report["_exit"] = proc.returncode
     report["_out"] = out
     return report
@@ -131,14 +134,14 @@ def _build(tmp: Path, spec: dict) -> dict:
 def default_build(tmp_path_factory):
     if not Path(BLENDER).exists():
         pytest.skip("Blender not installed")
-    return _build(tmp_path_factory.mktemp("crew_default"), json.loads(CATALOG.read_text()))
+    return _build(tmp_path_factory.mktemp("crew_default"), json.loads(CATALOG.read_text(encoding="utf-8")))
 
 
 @pytest.fixture(scope="module")
 def short_build(tmp_path_factory):
     if not Path(BLENDER).exists():
         pytest.skip("Blender not installed")
-    spec = json.loads(CATALOG.read_text())
+    spec = json.loads(CATALOG.read_text(encoding="utf-8"))
     spec["id"] = "crew_short"
     spec["body"]["height_cm"] = 160
     spec["equipment"] = ["life_vest", "helmet", "binoculars", "radio"]
@@ -303,7 +306,7 @@ def test_equipment_parented_under_bones(short_build):
         idx = _node(g, name)
         assert g.nodes[idx].mesh is not None, name
         assert parent[idx] == bone and bone in joints, (name, parent.get(idx))
-    parts = {p["path"]: p for p in json.loads((short_build["_out"] / "parts.json").read_text())}
+    parts = {p["path"]: p for p in json.loads((short_build["_out"] / "parts.json").read_text(encoding="utf-8"))}
     for name, bone in expected.items():
         assert parts[name]["bone"] == bone
         assert parts[name]["label"].startswith("Equipment › ")
@@ -311,7 +314,7 @@ def test_equipment_parented_under_bones(short_build):
 
 @needs_blender
 def test_parts_json_contract_fields(default_build):
-    parts = json.loads((default_build["_out"] / "parts.json").read_text())
+    parts = json.loads((default_build["_out"] / "parts.json").read_text(encoding="utf-8"))
     keys = {"path", "label", "parent", "joint", "station", "origin_m", "rotation_deg",
             "bounds_min", "bounds_max", "triangles"}
     assert parts and all(keys <= set(p) for p in parts)

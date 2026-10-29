@@ -37,7 +37,7 @@ def parse_args():
 def merged_params(spec, report):
     """Catalog defaults are the single source of each builder's knobs."""
     cat_path = os.path.join(ROOT, "catalog", "ships", f"{spec['type']}.json")
-    with open(cat_path) as f:
+    with open(cat_path, encoding="utf-8") as f:
         defaults = json.load(f)["params"]
     params = dict(defaults)
     for k, v in (spec.get("params") or {}).items():
@@ -54,7 +54,7 @@ def main():
     out = os.path.abspath(args.out)
     module = None
     try:
-        with open(args.spec) as f:
+        with open(args.spec, encoding="utf-8") as f:
             spec = json.load(f)
         if spec.get("schema") != "me3d.ship_spec/1":
             raise ValueError(f"schema must be me3d.ship_spec/1, got {spec.get('schema')!r}")
