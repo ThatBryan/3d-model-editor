@@ -170,3 +170,33 @@ describe('job polling state machine', () => {
     expect(describePoll(s, 14_000, 'Building')).toBe('Building · 14 s · Exporting glTF');
   });
 });
+
+import { groupPins, pinSummary, shortTime } from './pins';
+import type { Pin } from '../types';
+
+describe('comment summaries', () => {
+  const pin = (status: Pin['status'], texts: string[]): Pin => ({
+    id: `p${texts.length}${status}`, part: 'Funnel__Main', point: [0, 0, 0], status, author: 'You',
+    messages: texts.map((text, i) => ({ who: i % 2 ? 'AI' : 'You', text, at: `2026-10-29T00:3${i}:00Z` })),
+  });
+  it('keeps the first comment, the latest reply and the reply count', () => {
+    const s = pinSummary(pin('waiting', ['make it white', 'Done, all white']));
+    expect(s.first).toBe('make it white');
+    expect(s.latest?.text).toBe('Done, all white');
+    expect(s.replies).toBe(1);
+    expect(s.lastAt).toBe('2026-10-29T00:31:00Z');
+  });
+  it('handles a thread with no messages', () => {
+    expect(pinSummary(pin('open', []))).toEqual({ first: '', latest: null, replies: 0, lastAt: null });
+  });
+  it('splits open from resolved but keeps the number shown on the model', () => {
+    const g = groupPins([pin('resolved', ['a']), pin('open', ['b', 'c']), pin('waiting', ['d', 'e', 'f'])]);
+    expect(g.open.map((x) => x.n)).toEqual([2, 3]);
+    expect(g.resolved.map((x) => x.n)).toEqual([1]);
+  });
+  it('formats time and ignores bad timestamps', () => {
+    expect(shortTime('nonsense')).toBe('');
+    expect(shortTime(null)).toBe('');
+    expect(shortTime('2026-10-29T00:39:39Z')).toMatch(/^\d{1,2} Oct, \d{2}:\d{2}$/);
+  });
+});

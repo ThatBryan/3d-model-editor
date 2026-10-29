@@ -8,6 +8,7 @@ import { ChatPanel, ErrorNote, JobLines, PRIORITY, TopBar, useCarried } from '..
 import { remember, useJobs, useLoad, useProject } from '../hooks';
 import { blenderToGltf, type ViewName } from '../lib/frames';
 import { hiddenParts, isStationName, jointsOf, levelsFor, partLabel } from '../lib/parts';
+import { groupPins, pinSummary, shortTime } from '../lib/pins';
 import { paths } from '../lib/routing';
 import type { Part, Pin, Project, Vec3 } from '../types';
 import { PIN_COLORS, ShipViewer, ViewButtons, type JointPreview, type PickResult } from '../viewer/Viewer';
@@ -44,7 +45,7 @@ export function ShipBuild() {
   useEffect(() => { if (id) remember('ship', id); }, [id]);
   useEffect(() => { if (search.get('part')) { setSelPart(search.get('part')); setInspect(true); } }, [search]);
   useEffect(() => {
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPinMode(false); setDraft(null); } };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPinMode(false); setDraft(null); setSelPin(null); } };
     window.addEventListener('keydown', esc);
     return () => window.removeEventListener('keydown', esc);
   }, []);
@@ -55,7 +56,8 @@ export function ShipBuild() {
   const parts = (viewing ? olderParts.data : null) ?? project?.parts ?? [];
   const partPaths = useMemo(() => parts.map((p) => p.path), [parts]);
   const url = !project ? null : viewing ? modelUrl(project.id, viewing) : project.model_url;
-  const pins = viewing ? [] : project?.pins ?? [];
+  // Comments are a record of the project, so they stay listed and pinned whichever version is shown.
+  const pins = project?.pins ?? [];
   const pin = pins.find((p) => p.id === selPin?.id) ?? null;
   const openCount = pins.filter((p) => p.status !== 'resolved').length;
 
@@ -78,7 +80,7 @@ export function ShipBuild() {
 
   const startHiddenDraft = (p: Part) => {
     const c: Vec3 = [(p.bounds_min[0] + p.bounds_max[0]) / 2, (p.bounds_min[1] + p.bounds_max[1]) / 2, (p.bounds_min[2] + p.bounds_max[2]) / 2];
-    setSelPin(null);
+    setSelPin(null); setViewing(null);
     setDraft({ part: p.path, chosen: p.path, point: blenderToGltf(c), x: 40, y: 40 });
     setSelPart(p.path); setDraftText(''); setDraftErr(null);
   };
@@ -119,7 +121,7 @@ export function ShipBuild() {
         <div className="topbar-right">
           <span>{project ? `${project.name} · ${current ? `v${current}` : 'not built yet'} · ${busy ? 'working…' : 'saved'}` : ''}</span>
           {project && project.versions.length > 0 && (
-            <select className="field" aria-label="Version shown" value={shownVersion} onChange={(e) => { const n = Number(e.target.value); setViewing(n === current ? null : n); setSelPin(null); setDraft(null); }}>
+            <select className="field" aria-label="Version shown" value={shownVersion} onChange={(e) => { const n = Number(e.target.value); setViewing(n === current ? null : n); setDraft(null); }}>
               {[...project.versions].reverse().map((v) => (
                 <option key={v.n} value={v.n}>v{v.n}{v.n === current ? ' (current)' : ''}{v.ok === false ? ' · failed' : ''} · {v.summary}</option>
               ))}
@@ -148,15 +150,16 @@ export function ShipBuild() {
 
         <section className="stage">
           <div className="toolbar">
-            <button className={`btn ${pinMode ? 'primary' : 'selected'}`} style={{ padding: '0 14px' }} disabled={!url || !!viewing}
-              onClick={() => { setPinMode(!pinMode); setSelPin(null); setDraft(null); }}>
+            <button className={`btn ${pinMode ? 'primary' : 'selected'}`} style={{ padding: '0 14px' }} disabled={!url}
+              onClick={() => { if (viewing) { setViewing(null); setPinMode(true); } else setPinMode(!pinMode); setSelPin(null); setDraft(null); }}>
               {pinMode ? 'Placing a comment…' : 'Comment on a part'}
             </button>
             <span className="faint" style={{ fontSize: 12 }}>
-              {viewing ? `Viewing v${viewing}, read-only. Pick the current version to comment.`
+              {viewing ? `Viewing older v${viewing}, read-only. Commenting takes you back to the current version.`
                 : pinMode ? (hover ? `Pointing at ${partLabel(hover)}. Click to comment. Esc to cancel.` : 'Click any part of the model. Esc to cancel.')
                   : 'Or click a pin to open its thread.'}
             </span>
+            {viewing && <button className="btn primary sm" onClick={() => setViewing(null)}>Back to current v{current}</button>}
             <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
               <ViewButtons view={view} onView={(v) => { setView(v); setViewNonce((n) => n + 1); }} />
               <button className={`btn ${inspect ? 'selected' : 'muted'}`} onClick={() => setInspect(!inspect)}>Inspect</button>
@@ -178,7 +181,7 @@ export function ShipBuild() {
             onPinClick={(p, x, y) => { const l = local(x, y); setSelPin({ id: p.id, x: l.x, y: l.y }); setSelPart(p.part); setDraft(null); }}
             overlay={<>
               {pin && project && selPin && (
-                <Thread project={project} pin={pin} n={pins.indexOf(pin) + 1} at={selPin} stage={stageRef.current}
+                <Thread project={project} pin={pin} n={pins.indexOf(pin) + 1} at={selPin} stage={stageRef.current} shown={shownVersion}
                   busy={busy} error={actionErr}
                   onClose={() => setSelPin(null)}
                   onKeep={() => void pinAction(() => api.setPinStatus(project.id, pin.id, 'resolved'))}
@@ -230,24 +233,37 @@ function CommentsTab({ pins, parts, selected, onPick, onHidden, viewingOld }: {
   const all = parts.filter((p) => !isStationName(p.path));
   return (
     <div className="scroll" style={{ flex: 1, minHeight: 0, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {viewingOld && <span className="faint">Comments show on the current version.</span>}
-      {pins.map((p, i) => (
-        <button key={p.id} className={`row-btn ${selected === p.id ? 'on' : ''}`} onClick={() => onPick(p)}>
-          <span style={{ flexShrink: 0, width: 24, height: 24, borderRadius: 12, background: PIN_COLORS[p.status], color: 'var(--on-accent)', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-            <span style={{ fontWeight: 500 }}>{partLabel(p.part)}</span>
-            <span className="muted" style={{ fontSize: 12 }}>{p.messages[0]?.text}</span>
-            <span style={{ fontSize: 11, color: STATUS_COLOR[p.status] }}>{STATUS_TEXT[p.status] ?? p.status} · {p.author}</span>
-          </span>
-        </button>
-      ))}
+      {viewingOld && <span className="faint">Showing an older version. Comments still open here; new ones go on the current version.</span>}
+      {(['open', 'resolved'] as const).map((group) => {
+        const rows = groupPins(pins)[group];
+        if (!rows.length) return null;
+        return (
+          <div key={group} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <span className="faint" style={{ fontSize: 12 }}>{group === 'open' ? `Open (${rows.length})` : `Resolved (${rows.length})`}</span>
+            {rows.map(({ pin: p, n }) => {
+              const s = pinSummary(p);
+              return (
+                <button key={p.id} className={`row-btn ${selected === p.id ? 'on' : ''}`} onClick={() => onPick(p)}>
+                  <span style={{ flexShrink: 0, width: 24, height: 24, borderRadius: 12, background: PIN_COLORS[p.status], color: 'var(--on-accent)', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{n}</span>
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+                    <span style={{ fontWeight: 500 }}>{partLabel(p.part)}</span>
+                    <span style={{ fontSize: 12 }}>{s.first}</span>
+                    {s.latest && s.replies > 0 && <span className="muted" style={{ fontSize: 12, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{s.latest.who}: {s.latest.text}</span>}
+                    <span style={{ fontSize: 11, color: STATUS_COLOR[p.status] }}>{STATUS_TEXT[p.status] ?? p.status} · {s.replies} {s.replies === 1 ? 'reply' : 'replies'}{s.lastAt ? ` · ${shortTime(s.lastAt)}` : ''}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })}
       {!pins.length && <span className="faint">No comments yet. Press “Comment on a part” and click the model.</span>}
       <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <span className="faint" style={{ fontSize: 12 }}>Can't click it? Comment on a hidden part</span>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {hidden.map((p) => <button key={p.path} className="btn pill dashed" style={{ fontSize: 12 }} disabled={viewingOld} onClick={() => onHidden(p)}>{partLabel(p.path)}, underwater</button>)}
+          {hidden.map((p) => <button key={p.path} className="btn pill dashed" style={{ fontSize: 12 }} onClick={() => onHidden(p)}>{partLabel(p.path)}, underwater</button>)}
         </div>
-        <select className="field" aria-label="Comment on any part" value="" disabled={viewingOld} onChange={(e) => { const p = all.find((x) => x.path === e.target.value); if (p) onHidden(p); }}>
+        <select className="field" aria-label="Comment on any part" value="" onChange={(e) => { const p = all.find((x) => x.path === e.target.value); if (p) onHidden(p); }}>
           <option value="">Any part, from the list…</option>
           {all.map((p) => <option key={p.path} value={p.path}>{partLabel(p.path)}</option>)}
         </select>
@@ -264,11 +280,13 @@ function boxStyle(x: number, y: number, stage: HTMLElement | null): React.CSSPro
   return { left, top };
 }
 
-function Thread({ project, pin, n, at, stage, busy, error, onClose, onKeep, onUndo, onReopen, onReply, onInspect, onShowVersion }: {
+function Thread({ project, pin, n, at, stage, shown, busy, error, onClose, onKeep, onUndo, onReopen, onReply, onInspect, onShowVersion }: {
   project: Project; pin: Pin; n: number; at: { x: number; y: number }; stage: HTMLElement | null; busy: boolean; error: string | null;
   onClose: () => void; onKeep: () => void; onUndo: () => void; onReopen: () => void; onReply: (t: string) => void; onInspect: () => void; onShowVersion: (n: number) => void;
+  shown: number;
 }) {
   const [reply, setReply] = useState('');
+  const old = shown !== project.version;
   const undoable = pin.after_version === project.version && project.can_undo !== false;
   const send = () => { if (reply.trim()) { onReply(reply.trim()); setReply(''); } };
   return (
@@ -283,17 +301,27 @@ function Thread({ project, pin, n, at, stage, busy, error, onClose, onKeep, onUn
       <span className="faint" style={{ fontSize: 11 }}>Pin {n} · {pin.author} · attached to the part, follows it through rebuilds</span>
       {pin.messages.map((m, i) => (
         <div key={i} className={`msg ${m.who === 'AI' ? 'ai' : m.who === 'Customer' ? 'customer' : 'me'}`}>
-          <span className="faint" style={{ fontSize: 11 }}>{m.who}</span><span>{m.text}</span>
+          <span className="faint" style={{ fontSize: 11 }}>{m.who}{m.at ? ` · ${shortTime(m.at)}` : ''}</span><span>{m.text}</span>
         </div>
       ))}
       {pin.status === 'working' && <span style={{ display: 'flex', gap: 8, alignItems: 'center' }} className="muted"><span className="spinner" />The AI is making this change…</span>}
       {pin.before_version != null && pin.after_version != null && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6, fontSize: 11 }}>
-          <button onClick={() => onShowVersion(pin.before_version!)} style={{ height: 54, borderRadius: 6, background: 'var(--bubble)', border: 0, color: 'var(--text-3)' }}>Before · v{pin.before_version}<br />show</button>
-          <button onClick={() => onShowVersion(pin.after_version!)} style={{ height: 54, borderRadius: 6, background: 'var(--accent-bg)', border: 0, color: 'var(--accent-text)' }}>After · v{pin.after_version}<br />show</button>
+          {[['Before', pin.before_version!], ['After', pin.after_version!]].map(([label, v]) => (
+            <button key={label} aria-pressed={shown === v} onClick={() => onShowVersion(v as number)}
+              style={{ height: 54, borderRadius: 6, border: shown === v ? '1px solid var(--accent)' : '1px solid transparent', background: shown === v ? 'var(--accent-bg)' : 'var(--bubble)', color: shown === v ? 'var(--accent-text)' : 'var(--text-3)' }}>
+              {label} · v{v}<br />{shown === v ? 'showing' : 'show'}
+            </button>
+          ))}
         </div>
       )}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      {old && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }} className="muted">
+          <span>Showing older v{shown}. To reply or keep it, go back.</span>
+          <button className="btn sm primary" onClick={() => onShowVersion(project.version)}>Back to current</button>
+        </div>
+      )}
+      {!old && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {pin.status === 'waiting' && <>
           <button className="btn sm primary" onClick={onKeep} disabled={busy}>Keep it</button>
           <button className="btn sm" onClick={onUndo} disabled={busy || !undoable}
@@ -302,11 +330,13 @@ function Thread({ project, pin, n, at, stage, busy, error, onClose, onKeep, onUn
         {pin.status === 'open' && <button className="btn sm primary" disabled={busy} onClick={() => onReply('Please make this change.')}>Ask AI to fix</button>}
         {pin.status === 'resolved' && <button className="btn sm" onClick={onReopen}>Reopen</button>}
         <button className="btn sm" onClick={onInspect}>Inspect</button>
-      </div>
+      </div>}
       {error && <span className="bad" style={{ fontSize: 12 }}>{error}</span>}
-      <label htmlFor="reply" className="sr-only">Reply</label>
-      <input id="reply" className="field dark" style={{ height: 34, fontSize: 12 }} placeholder="Reply or ask for another change" value={reply}
-        onChange={(e) => setReply(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') send(); }} disabled={pin.status === 'working'} />
+      {!old && <>
+        <label htmlFor="reply" className="sr-only">Reply</label>
+        <input id="reply" className="field dark" style={{ height: 34, fontSize: 12 }} placeholder="Reply or ask for another change" value={reply}
+          onChange={(e) => setReply(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') send(); }} disabled={pin.status === 'working'} />
+      </>}
     </div>
   );
 }
